@@ -22,6 +22,7 @@ type DemoState = {
   sendCount: number;
   parentName: string | null;
   homeworkSubmitted: boolean;
+  successDismissed: boolean;
 };
 
 type DemoAction =
@@ -30,6 +31,7 @@ type DemoAction =
   | { type: "CONFIRM_PARENT" }
   | { type: "RESET" }
   | { type: "SUBMIT_HOMEWORK" }
+  | { type: "DISMISS_SUCCESS" }
   | { type: "SET_STATUS"; status: ConsentStatus };
 
 type HomeworkVariant = "deadline" | "debt" | "waiting" | "score" | "problems";
@@ -84,7 +86,8 @@ const initialState: DemoState = {
   lastLinkSentAt: null,
   sendCount: 0,
   parentName: null,
-  homeworkSubmitted: false
+  homeworkSubmitted: false,
+  successDismissed: false
 };
 
 const activeCards: HomeworkCardItem[] = [
@@ -248,6 +251,11 @@ function reducer(state: DemoState, action: DemoAction): DemoState {
         ...state,
         homeworkSubmitted: true
       };
+    case "DISMISS_SUCCESS":
+      return {
+        ...state,
+        successDismissed: true
+      };
     case "SET_STATUS":
       if (action.status === "confirmed") {
         return {
@@ -323,7 +331,9 @@ function statusLabel(status: ConsentStatus) {
   }
 }
 
-const SHARE_URL = "https://neuroom.pw/register/parent/abc123token";
+function getShareUrl() {
+  return `${window.location.origin}/consent-prototype/parent/confirm?token=abc123xyz`;
+}
 
 function App() {
   const [state, dispatch] = useReducer(reducer, undefined, loadState);
@@ -332,9 +342,26 @@ function App() {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key !== STORAGE_KEY || !e.newValue) return;
+      try {
+        const next = JSON.parse(e.newValue) as DemoState;
+        if (next.status === "confirmed" && state.status !== "confirmed") {
+          dispatch({ type: "CONFIRM_PARENT" });
+        }
+      } catch { /* ignore */ }
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [state.status]);
+
   return (
     <DemoContext.Provider value={{ state, dispatch }}>
-      <PrototypeShell />
+      <Routes>
+        <Route path="/parent/confirm" element={<ParentConfirmPage />} />
+        <Route path="*" element={<PrototypeShell />} />
+      </Routes>
     </DemoContext.Provider>
   );
 }
@@ -362,21 +389,9 @@ function PrototypeShell() {
   async function handleQuickShare() {
     dispatch({ type: "SEND_LINK" });
     try {
-      if (navigator.share) {
-        await navigator.share({
-          title: "Нейрум — согласие родителя",
-          text: "Подтвердите согласие на использование Нейрум вашим ребёнком",
-          url: SHARE_URL
-        });
-        setToast("Ссылка отправлена родителю.");
-      } else {
-        await navigator.clipboard.writeText(SHARE_URL);
-        setToast("Ссылка скопирована. Перешли её родителю.");
-      }
-    } catch {
-      await navigator.clipboard.writeText(SHARE_URL);
-      setToast("Ссылка скопирована. Перешли её родителю.");
-    }
+      await navigator.clipboard.writeText(getShareUrl());
+    } catch { /* ignore */ }
+    setToast("Ссылка скопирована");
   }
 
   function handleSendLink(method: "share" | "copy") {
@@ -457,8 +472,8 @@ function PrototypeShell() {
             />
           ) : null}
 
-          {state.status === "confirmed" && !location.pathname.startsWith("/parent/confirm") ? (
-            <SuccessNotice parentName={state.parentName ?? "Елена Викторовна"} />
+          {state.status === "confirmed" && !state.successDismissed && !location.pathname.startsWith("/parent/confirm") ? (
+            <SuccessNotice parentName={state.parentName ?? "Елена Викторовна"} onDismiss={() => dispatch({ type: "DISMISS_SUCCESS" })} />
           ) : null}
 
           <Routes>
@@ -466,7 +481,6 @@ function PrototypeShell() {
             <Route path="/homework/:id" element={<HomeworkDetailPage />} />
             <Route path="/homework/:id/send" element={<HomeworkSendPage />} />
             <Route path="/profile" element={<ProfilePage onOpenSendLink={() => setShareOpen(true)} />} />
-            <Route path="/parent/confirm" element={<ParentConfirmPage />} />
           </Routes>
         </div>
       </main>
@@ -491,7 +505,7 @@ function PrototypeShell() {
           onClose={() => setShareOpen(false)}
           onCopy={() => handleSendLink("copy")}
           onShare={() => handleSendLink("share")}
-          url={SHARE_URL}
+          url={getShareUrl()}
         />
       ) : null}
 
@@ -500,9 +514,9 @@ function PrototypeShell() {
     {toast ? (
       <div className="toast-backdrop" onClick={() => setToast(null)}>
         <div className="toast" onClick={(event) => event.stopPropagation()}>
-          <div className="toast__icon">✓</div>
+          <div className="toast__icon">📋</div>
           <p className="toast__title">{toast}</p>
-          <p className="toast__subtitle">Перешли ссылку родителю в любом мессенджере</p>
+          <p className="toast__subtitle">Отправь её родителю в любом мессенджере</p>
         </div>
       </div>
     ) : null}
@@ -538,21 +552,21 @@ function ConsentBanner(props: {
           Отправь ссылку маме или папе — они подтвердят за пару минут.
         </p>
       </div>
-      <button className="primary-button" onClick={props.onAction} type="button">
-        {props.sent ? "Отправить ещё раз" : "Отправить ссылку"}
+      <button className="primary-button primary-button--icon" onClick={props.onAction} type="button">
+        <span>{props.sent ? "Скопировать ещё раз" : "Скопировать ссылку"}</span>
       </button>
     </section>
   );
 }
 
-function SuccessNotice(props: { parentName: string }) {
+function SuccessNotice(props: { parentName: string; onDismiss: () => void }) {
   return (
     <section className="success-notice">
       <div>
         <h2>Согласие получено</h2>
         <p>{props.parentName} подтвердил(а) доступ. Теперь ты можешь сдавать домашние задания без ограничений.</p>
       </div>
-      <span className="success-notice__badge">Подтверждено</span>
+      <button className="success-notice__dismiss" onClick={props.onDismiss} type="button">Понятно</button>
     </section>
   );
 }
@@ -900,69 +914,117 @@ function ProfilePage(props: { onOpenSendLink: () => void }) {
 function ParentConfirmPage() {
   const navigate = useNavigate();
   const { dispatch } = useDemoState();
-  const [agreed, setAgreed] = useState(false);
+  /* Parent sees this page standalone — no student shell */
+  const [step, setStep] = useState(1);
+  const [isPermission, setIsPermission] = useState(false);
+  const [isPolicy, setIsPolicy] = useState(false);
+  const [code, setCode] = useState("");
+
+  const formValid = isPermission && isPolicy;
 
   return (
-    <section className="surface-card surface-card--parent">
-      <div className="parent-hero">
-        <div className="consent-banner__logo">
-          <img alt="" src={assets.logoMark} />
-        </div>
-        <div>
-          <h2>Согласие на обработку данных</h2>
-          <p>Заполните данные, чтобы подтвердить использование сервиса Нейрум вашим ребёнком — учеником Артемом П.</p>
-        </div>
-      </div>
+    <div className="parent-standalone">
+      <div className="modal-card">
 
-      <div className="parent-form">
-        <div className="parent-form__row">
-          <label className="parent-form__field">
-            <span>Фамилия</span>
-            <input defaultValue="Петрова" placeholder="Фамилия" type="text" />
-          </label>
-          <label className="parent-form__field">
-            <span>Имя</span>
-            <input defaultValue="Елена" placeholder="Имя" type="text" />
-          </label>
-          <label className="parent-form__field">
-            <span>Отчество</span>
-            <input defaultValue="Викторовна" placeholder="Отчество" type="text" />
-          </label>
-        </div>
-        <div className="parent-form__row">
-          <label className="parent-form__field">
-            <span>Телефон</span>
-            <input defaultValue="+7 999 123 45 67" placeholder="+7" type="tel" />
-          </label>
-          <label className="parent-form__field">
-            <span>Email (необязательно)</span>
-            <input placeholder="email@example.com" type="email" />
-          </label>
-        </div>
+        {step === 0 && (
+          <>
+            <div className="modal-header">
+              <img alt="Нейрум" className="modal-logo" src={assets.logoMark} />
+              <h2>Позови родителей, чтобы продолжить</h2>
+              <p>Родители должны подписать разрешение на использование твоих данных. Это важно</p>
+            </div>
+            <div className="modal-actions">
+              <button className="primary-button primary-button--fit" onClick={() => setStep(1)} type="button">
+                Заполнить данные
+              </button>
+              <button className="link-button" onClick={() => navigate("/")} type="button">
+                Вернуться позже
+              </button>
+            </div>
+          </>
+        )}
 
-        <label className="parent-form__checkbox">
-          <input checked={agreed} onChange={() => setAgreed((v) => !v)} type="checkbox" />
-          <span>
-            Я даю согласие на обработку персональных данных моего ребёнка в соответствии с{" "}
-            <a href="/policy" target="_blank">политикой конфиденциальности</a>
-          </span>
-        </label>
-      </div>
+        {step === 1 && (
+          <>
+            <div className="modal-header modal-header--compact">
+              <span className="modal-chip">Артем П.</span>
+              <h2>Согласно 152-ФЗ, для продолжения работы с сервисом заполните данные:</h2>
+              <p className="modal-hint">Поля, отмеченные звёздочкой, обязательны к заполнению</p>
+            </div>
+            <div className="parent-form">
+              <div className="parent-form__row">
+                <label className="parent-form__field">
+                  <span>Фамилия родителя*</span>
+                  <input placeholder="Введите фамилию" type="text" />
+                </label>
+                <label className="parent-form__field">
+                  <span>Имя родителя*</span>
+                  <input placeholder="Введите имя" type="text" />
+                </label>
+                <label className="parent-form__field">
+                  <span>Отчество родителя</span>
+                  <input placeholder="Введите отчество" type="text" />
+                </label>
+              </div>
+              <div className="parent-form__row">
+                <label className="parent-form__field">
+                  <span>Номер родителя*</span>
+                  <input placeholder="+7" type="tel" />
+                </label>
+                <label className="parent-form__field">
+                  <span>Ваш email (для доступа к ЛК ребёнка)</span>
+                  <input placeholder="Электронная почта" type="email" />
+                </label>
+              </div>
+              <label className="parent-form__checkbox">
+                <input checked={isPermission} onChange={() => setIsPermission((v) => !v)} type="checkbox" />
+                <span>Разрешаете использовать персональные данные ребёнка.</span>
+              </label>
+              <label className="parent-form__checkbox">
+                <input checked={isPolicy} onChange={() => setIsPolicy((v) => !v)} type="checkbox" />
+                <span>Вы принимаете <a href="/license" target="_blank">соглашение</a> и <a href="/policy" target="_blank">политику конфиденциальности</a>.</span>
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button className="primary-button primary-button--fit" disabled={!formValid} onClick={() => setStep(2)} type="button">
+                Продолжить
+              </button>
+            </div>
+          </>
+        )}
 
-      <div className="parent-actions">
-        <button
-          className="primary-button primary-button--fit"
-          disabled={!agreed}
-          onClick={() => {
-            dispatch({ type: "CONFIRM_PARENT" });
-            navigate("/profile");
-          }}
-          type="button"
-        >
-          Подтвердить согласие
-        </button>
+        {step === 2 && (
+          <>
+            <div className="modal-header modal-header--compact">
+              <span className="modal-chip">Артем П.</span>
+              <h2>Подтвердите данные как родитель ребёнка</h2>
+              <p>Введите 5-значный код из SMS по номеру <strong>+7 999 123 45 67</strong></p>
+            </div>
+            <div className="parent-form">
+              <label className="parent-form__field">
+                <span>Проверочный код из SMS</span>
+                <input maxLength={5} onChange={(e) => setCode(e.target.value)} placeholder="Введите код" type="text" value={code} />
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button className="primary-button primary-button--fit" disabled={code.length < 5} onClick={() => { dispatch({ type: "CONFIRM_PARENT" }); setStep(3); }} type="button">
+                Продолжить
+              </button>
+            </div>
+          </>
+        )}
+
+        {step === 3 && (
+          <>
+            <div className="modal-header">
+              <div className="modal-success-icon">✓</div>
+              <h2>Спасибо! Согласие подтверждено</h2>
+              <p>Теперь ваш ребёнок может полноценно пользоваться сервисом Нейрум. Сообщите ребёнку, что согласие подтверждено — он сразу это увидит. Эту страницу можно закрыть.</p>
+            </div>
+          </>
+        )}
       </div>
-    </section>
+    </div>
   );
 }
 
