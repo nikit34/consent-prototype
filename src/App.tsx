@@ -514,6 +514,7 @@ function PrototypeShell() {
     {toast ? (
       <div className="toast-backdrop" onClick={() => setToast(null)}>
         <div className="toast" onClick={(event) => event.stopPropagation()}>
+          <button className="toast__close" onClick={() => setToast(null)} type="button">✕</button>
           <div className="toast__icon">📋</div>
           <p className="toast__title">{toast}</p>
           <p className="toast__subtitle">Отправь её родителю в любом мессенджере</p>
@@ -562,10 +563,11 @@ function ConsentBanner(props: {
 function SuccessNotice(props: { parentName: string; onDismiss: () => void }) {
   return (
     <section className="success-notice">
-      <div>
+      <div className="success-notice__top">
         <h2>Согласие получено</h2>
-        <p>{props.parentName} подтвердил(а) доступ. Теперь ты можешь сдавать домашние задания без ограничений.</p>
+        <span className="success-notice__badge">Подтверждено</span>
       </div>
+      <p>{props.parentName} подтвердил(а) доступ. Теперь ты можешь сдавать домашние задания без ограничений.</p>
       <button className="success-notice__dismiss" onClick={props.onDismiss} type="button">Понятно</button>
     </section>
   );
